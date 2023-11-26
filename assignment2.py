@@ -7,7 +7,7 @@ from joblib import Parallel, delayed
 from scipy.stats import gaussian_kde
 
 plt.style.use("fivethirtyeight")
-
+PARALLEL = True
 
 def sample_one_dataset(k=100, T=200, rho=0.75):
     X = np.zeros((T, k))
@@ -46,7 +46,7 @@ def generate_datasets(n_datasets=100, parallel=True):
     return X, eps
 
 
-def sample_q(X, eps, s, R_y, k=100, T=200):
+def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200):
     return np.random.randn(100_000)
 
 
@@ -115,19 +115,31 @@ def make_plots(q, medians, s, R_y):
     )
     ax2.legend()
     plt.show()
-
+    
 
 if __name__ == "__main__":
     # Question 1
+    print("Generating datasets...")
     X, eps = generate_datasets(n_datasets=100)
+    print("Done!")
 
     # Question 2
     for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
+        
         posterior_median_q = np.zeros(X.shape[0])
         q = np.zeros((X.shape[0], 100_000))
-
-        for i in range(X.shape[0]):
-            q[i, :] = sample_q(X[i, :], eps[i, :], s, R_y)
-            posterior_median_q[i] = np.median(q[i, :])
+        
+        if PARALLEL:
+            q = Parallel(n_jobs=-1)(
+                delayed(sample_posterior_marginal_q)(
+                    X[i, :], eps[i, :], s, R_y
+                ) for i in range(X.shape[0])
+            )
+            q = np.stack(q, axis=0)
+        else:
+            for i in range(X.shape[0]):
+                q[i, :] = sample_posterior_marginal_q(X[i, :], eps[i, :], s, R_y)
+        
+        posterior_median_q = np.median(q, axis=1)
 
         make_plots(q[-1, :], posterior_median_q, s, R_y)
