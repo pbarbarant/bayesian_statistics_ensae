@@ -5,9 +5,11 @@ from itertools import product
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from scipy.stats import gaussian_kde
+from scipy.stats import invgamma
 
 plt.style.use("fivethirtyeight")
 PARALLEL = True
+
 
 def sample_one_dataset(k=100, T=200, rho=0.75):
     X = np.zeros((T, k))
@@ -46,7 +48,36 @@ def generate_datasets(n_datasets=100, parallel=True):
     return X, eps
 
 
+def sample_joint_R2_q(X, eps, s, R_y, k=100, T=200):
+    pass
+
+
+def sample_z():
+    pass
+
+
+def sample_sigma2(X_tilde, Y_tilde, z, T, gamma):
+    sz = int(np.sum(z))
+    W_tilde = X_tilde.T @ X_tilde + np.eye(sz) / gamma**2
+    beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
+    scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
+    return invgamma(T / 2, scale=scale)
+
+
+def sample_beta_hat(X, eps, sigma2, beta_hat):
+    pass
+
+
 def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200):
+    list_q = []
+    for _ in range(110_000):
+        R2, q = sample_joint_R2_q(X, eps, s, R_y, k, T)
+        z = sample_z()
+        sigma2 = sample_sigma2(R2, q, z)
+        beta_hat = sample_beta_hat(X, eps, sigma2, beta_hat)
+        list_q.append(q)
+
+    output = np.array(list_q)[10_000:]
     return np.random.randn(100_000)
 
 
@@ -115,7 +146,7 @@ def make_plots(q, medians, s, R_y):
     )
     ax2.legend()
     plt.show()
-    
+
 
 if __name__ == "__main__":
     # Question 1
@@ -125,21 +156,19 @@ if __name__ == "__main__":
 
     # Question 2
     for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
-        
         posterior_median_q = np.zeros(X.shape[0])
         q = np.zeros((X.shape[0], 100_000))
-        
+
         if PARALLEL:
             q = Parallel(n_jobs=-1)(
-                delayed(sample_posterior_marginal_q)(
-                    X[i, :], eps[i, :], s, R_y
-                ) for i in range(X.shape[0])
+                delayed(sample_posterior_marginal_q)(X[i, :], eps[i, :], s, R_y)
+                for i in range(X.shape[0])
             )
             q = np.stack(q, axis=0)
         else:
             for i in range(X.shape[0]):
                 q[i, :] = sample_posterior_marginal_q(X[i, :], eps[i, :], s, R_y)
-        
+
         posterior_median_q = np.median(q, axis=1)
 
         make_plots(q[-1, :], posterior_median_q, s, R_y)
