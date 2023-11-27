@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 from itertools import product
 from tqdm import tqdm
 from joblib import Parallel, delayed
-from scipy.stats import gaussian_kde
-from scipy.stats import invgamma
+from scipy import stats
+from sklearn import linear_model
+from scipy import special
 
 plt.style.use("fivethirtyeight")
-PARALLEL = True
+PARALLEL = False
 
 
 def sample_one_dataset(k=100, T=200, rho=0.75):
@@ -48,36 +49,74 @@ def generate_datasets(n_datasets=100, parallel=True):
     return X, eps
 
 
-def sample_joint_R2_q(X, eps, s, R_y, k=100, T=200):
-    pass
+def sample_joint_R2_q(X, eps, s, R2, q, k, T):
+    return 0, 0
 
 
-def sample_z():
-    pass
+def sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma):
+    s = int(np.sum(z))
+    # Problem with prob
+    prob = q**s * (1 - q)**(k - s) * (1/gamma**2)**(s/2) * np.sum(np.abs(W_tilde))**(-1/2) * ((Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat)/2)**(-T/2) * special.gamma(T/2)
+    return np.random.binomial(1, prob)
+
+
+def sample_z(z, k, q, X_tilde, beta_tilde_hat, Y_tilde, T, gamma, n_iter_gibbs=1000):
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
+    for _ in range(n_iter_gibbs):
+        for i in range(z.shape[0]):
+            z[i] = sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma)
+    return z, int(np.sum(z))
 
 
 def sample_sigma2(X_tilde, Y_tilde, z, T, gamma):
-    sz = int(np.sum(z))
-    W_tilde = X_tilde.T @ X_tilde + np.eye(sz) / gamma**2
+    s = int(np.sum(z))
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
     beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
     scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
-    return invgamma(T / 2, scale=scale)
+    return stats.invgamma(T / 2, scale=scale)
 
 
-def sample_beta_hat(X, eps, sigma2, beta_hat):
-    pass
+def sample_beta_tilde(X_tilde, eps, beta, z, sigma2, gamma):
+    s = int(np.sum(z))
+    W_tilde_inv = np.linalg.inv(np.eye(s) / gamma**2 + X_tilde.T @ X_tilde)
+    return np.random.multivariate_normal(W_tilde_inv @ X_tilde.T @ (X @ beta + eps), sigma2 * W_tilde_inv)
 
 
-def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200):
-    list_q = []
+def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200, gamma=1e-6):
+    q_chain = []
+    
+    # Initialize values
+    R2 = R_y
+    q = .1
+    z = np.array([0] * (k - s) + [1] * s)
+    np.random.shuffle(z)
+    beta = (np.random.randn(k) * z).reshape(-1,1)
+    sigma2 = (1 / R_y - 1) / T * np.sum((X @ beta)**2)
+    
+    X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
+    Y_tilde = (X_tilde @ beta_tilde) + eps
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
+    beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
+    
     for _ in range(110_000):
-        R2, q = sample_joint_R2_q(X, eps, s, R_y, k, T)
-        z = sample_z()
-        sigma2 = sample_sigma2(R2, q, z)
-        beta_hat = sample_beta_hat(X, eps, sigma2, beta_hat)
-        list_q.append(q)
+        R2, q = sample_joint_R2_q(X, eps, s, R2, q, k, T)
+        R2, q = 1, 0.5
+        
+        z, s = sample_z(z, k, q, X_tilde, beta_tilde_hat, Y_tilde, T, gamma)
+        
+        X_tilde = X[:, z == 1]
+        Y_tilde = (X_tilde @ beta_tilde) + eps
+        W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
+        beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
+        
+        sigma2 = sample_sigma2(X_tilde, Y_tilde, z, T, gamma)
+        
+        beta_tilde = sample_beta_tilde(X_tilde, eps, beta, z, sigma2, gamma)
+        
+        q_chain.append(q)
 
-    output = np.array(list_q)[10_000:]
+    output = np.array(q_chain)[10_000:]
     return np.random.randn(100_000)
 
 
@@ -87,7 +126,7 @@ def plot_posterior_median_q(medians, s, R_y):
     # Add histogram
     ax.hist(medians, bins=50, density=True)
     # Add kernel density estimation
-    kde = gaussian_kde(medians)
+    kde = stats.gaussian_kde(medians)
     x = np.linspace(medians.min(), medians.max(), 1000)
     ax.plot(x, kde(x), label="KDE")
     ax.set_xlabel("Posterior median of q")
@@ -105,7 +144,7 @@ def plot_marginal_posterior_q(q, s, R_y):
     # Add histogram
     ax.hist(q, bins=50, density=True)
     # Add kernel density estimation
-    kde = gaussian_kde(q)
+    kde = stats.gaussian_kde(q)
     x = np.linspace(q.min(), q.max(), 1000)
     ax.plot(x, kde(x), label="KDE")
     ax.set_xlabel("q")
@@ -125,10 +164,10 @@ def make_plots(q, medians, s, R_y):
     ax2.hist(q, bins=50, density=True)
 
     # Add kernel density estimations
-    kde1 = gaussian_kde(medians)
+    kde1 = stats.gaussian_kde(medians)
     x = np.linspace(medians.min(), medians.max(), 1000)
     ax1.plot(x, kde1(x), label="KDE")
-    kde2 = gaussian_kde(q)
+    kde2 = stats.gaussian_kde(q)
     y = np.linspace(q.min(), q.max(), 1000)
     ax2.plot(y, kde2(y), label="KDE")
 
