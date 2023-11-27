@@ -142,42 +142,6 @@ def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200, gamma=1e-6):
     return np.array(q_chain)[10_000:]
 
 
-def plot_posterior_median_q(medians, s, R_y):
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(111)
-    # Add histogram
-    ax.hist(medians, bins=50, density=True)
-    # Add kernel density estimation
-    kde = stats.gaussian_kde(medians)
-    x = np.linspace(medians.min(), medians.max(), 1000)
-    ax.plot(x, kde(x), label="KDE")
-    ax.set_xlabel("Posterior median of q")
-    ax.set_ylabel("Density")
-    ax.set_title(
-        f"Histogram of posterior median of q with s={s} and R_y={int(R_y*100)}%"
-    )
-    ax.legend()
-    return fig, ax
-
-
-def plot_marginal_posterior_q(q, s, R_y):
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(111)
-    # Add histogram
-    ax.hist(q, bins=50, density=True)
-    # Add kernel density estimation
-    kde = stats.gaussian_kde(q)
-    x = np.linspace(q.min(), q.max(), 1000)
-    ax.plot(x, kde(x), label="KDE")
-    ax.set_xlabel("q")
-    ax.set_ylabel("Density")
-    ax.set_title(
-        f"Histogram of marginal posterior distribution of q\nwith s={s} and R_y={int(R_y*100)}% (last dataset)"
-    )
-    ax.legend()
-    return fig, ax
-
-
 def make_plots(q, medians, s, R_y):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
 
