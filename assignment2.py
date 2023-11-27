@@ -48,7 +48,7 @@ def generate_datasets(n_datasets=100, parallel=True):
     return X, eps
 
 
-def sample_joint_R2_q(X, eps, z, beta, R2, q, sigma2, k, T):
+def sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T):
     x = np.concatenate([
         np.arange(.001, .1, 0.001),
         np.arange(.1, .9, 0.01),
@@ -75,17 +75,16 @@ def sample_joint_R2_q(X, eps, z, beta, R2, q, sigma2, k, T):
 
 def sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma):
     s = int(np.sum(z))
-    # Problem with prob
-    prob = q**s * (1 - q)**(k - s) * (1/gamma**2)**(s/2) * np.sum(np.abs(W_tilde))**(-1/2) * ((Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat)/2)**(-T/2) * special.gamma(T/2)
+    # TODO Problem with prob
+    prob = q**s * (1 - q)**(k - s) * (1/gamma**2)**(s/2) * np.linalg.det(W_tilde)**(-1/2) * ((Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat)/2).item()**(-T/2) * special.gamma(T/2)
     return np.random.binomial(1, prob)
 
 
-def sample_z(z, k, q, X_tilde, beta_tilde_hat, Y_tilde, T, gamma, n_iter_gibbs=1000):
-    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
+def sample_z(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma, n_iter_gibbs=1):
     for _ in range(n_iter_gibbs):
         for i in range(z.shape[0]):
             z[i] = sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma)
-    return z, int(np.sum(z))
+    return z
 
 
 def sample_sigma2(X_tilde, Y_tilde, W_tilde, T):
@@ -100,9 +99,10 @@ def sample_beta_tilde(X_tilde, W_tilde, Y_tilde, sigma2):
     return np.random.multivariate_normal(beta_tilde_hat.reshape(-1), sigma2 * W_tilde_inv).reshape(-1, 1)
 
 
-def update_vectors(X, eps, z, beta_tilde, gamma):
+def update_vectors(X, eps, z, beta, gamma):
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
     Y_tilde = (X_tilde @ beta_tilde) + eps
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
     return X_tilde, Y_tilde, W_tilde
@@ -113,27 +113,29 @@ def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200, gamma=1e-6):
     
     # Initialize values
     R2 = R_y
-    q = .1
+    q = .5
     z = np.array([0] * (k - s) + [1] * s)
     np.random.shuffle(z)
     beta = (np.random.randn(k) * z).reshape(-1,1)
     sigma2 = (1 / R_y - 1) / T * np.sum((X @ beta)**2)
     
     beta_tilde = beta[z == 1]
-    X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta_tilde, gamma)
+    X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta, gamma)
     beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
     
-    for iterat in range(110_000):
-        print(f"iteration: {iterat}")
-        R2, q = sample_joint_R2_q(X, eps, z, beta, R2, q, sigma2, k, T)
-        print(f"R2: {R2}, q: {q}")
-        # z = sample_z(z, k, q, X_tilde, beta_tilde_hat, Y_tilde, T, gamma)
+    for iterat in tqdm(range(110_000)):
+        # print(f"iteration: {iterat}")
+        R2, q = sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T)
 
-        X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta_tilde, gamma)
+        z = sample_z(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma)
+
+        X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta, gamma)
         
         sigma2 = sample_sigma2(X_tilde, Y_tilde, W_tilde, T)
         
         beta_tilde = sample_beta_tilde(X_tilde, W_tilde, Y_tilde, sigma2)
+        beta = np.zeros((k, 1))
+        beta[z == 1] = beta_tilde
         
         q_chain.append(q)
 
@@ -220,13 +222,13 @@ if __name__ == "__main__":
 
         if PARALLEL:
             q = Parallel(n_jobs=-1)(
-                delayed(sample_posterior_marginal_q)(X[i, :], eps[i, :], s, R_y)
+                delayed(sample_posterior_marginal_q)(X[i, :, :], eps[i, :], s, R_y)
                 for i in range(X.shape[0])
             )
             q = np.stack(q, axis=0)
         else:
             for i in range(X.shape[0]):
-                q[i, :] = sample_posterior_marginal_q(X[i, :], eps[i, :], s, R_y)
+                q[i, :] = sample_posterior_marginal_q(X[i, :, :], eps[i, :], s, R_y)
 
         posterior_median_q = np.median(q, axis=1)
 
