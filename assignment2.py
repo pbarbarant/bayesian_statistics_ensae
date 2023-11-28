@@ -188,19 +188,19 @@ def make_plots(q, medians, s, R_y):
 
 if __name__ == "__main__":
     N_datasets = 3
-    N_iter = 20
-    burn_in = 10
+    N_iter = 5
+    burn_in = 1
     
-    q_matrix = np.zeros((N_datasets, N_iter))
-    for i in range(N_datasets):
-        for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
+    for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
+        q_matrix = np.zeros((N_datasets, N_iter))
+        for i in range(N_datasets):
             print(f"Dataset {i}, s={s}, R_y={R_y}")
             X, beta, eps, sigma2, R2, q, z = sample_one_dataset(s, R_y)
             for k in tqdm(range(N_iter)):
                 R2, q, z, sigma2, beta = one_gibbs_iteration(X, eps, R_y, q, z, sigma2, beta)
                 q_matrix[i, k] = q
 
-    q_matrix = q_matrix[:, burn_in:]
-    posterior_median_q = np.median(q_matrix, axis=1)
-    # Plot posterior median of q and marginal posterior distribution of q for the last dataset
-    make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
+        q_matrix = q_matrix[:, burn_in:]
+        posterior_median_q = np.median(q_matrix, axis=1)
+        # Plot posterior median of q and marginal posterior distribution of q for the last dataset
+        make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
