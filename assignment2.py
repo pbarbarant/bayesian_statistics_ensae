@@ -155,7 +155,7 @@ def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
 
 def make_plots(q, medians, s, R_y):
     '''Plot posterior median of q and marginal posterior distribution of q for a given dataset'''
-    _, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
 
     # Add histograms
     ax1.hist(medians, bins=50, density=True)
@@ -182,7 +182,8 @@ def make_plots(q, medians, s, R_y):
         f"Histogram of marginal posterior distribution of q\nwith s={s} and R_y={int(R_y*100)}% (last dataset)"
     )
     ax2.legend()
-    plt.show()
+    # plt.show()
+    fig.savefig(f"figures/s={s}_R_y={int(R_y*100)}.png")
 
 
 if __name__ == "__main__":
