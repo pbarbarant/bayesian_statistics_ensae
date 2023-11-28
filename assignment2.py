@@ -110,6 +110,7 @@ def compute_gamma2(X, R2, q, k=100):
 
 @jit
 def sample_sigma2(X, eps, beta, R2, q, z, T=200):
+    '''Sample sigma2 using formula 4'''
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
     beta_tilde = beta[z == 1]
@@ -122,6 +123,7 @@ def sample_sigma2(X, eps, beta, R2, q, z, T=200):
 
 @jit
 def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
+    '''Sample sigma2 using formula 5'''
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
     beta_tilde = beta[z == 1]
@@ -134,6 +136,7 @@ def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
 
 @jit
 def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
+    '''Auxiliary function to sample beta from beta_tilde'''
     beta_tilde = sample_beta_tilde(X, eps, beta, R2, q, sigma2, z)
     beta = np.zeros((k, 1))
     beta[z == 1] = beta_tilde
@@ -142,6 +145,7 @@ def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
 
 @jit
 def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
+    '''Run one iteration of the Gibbs sampler'''
     R2, q = sample_joint_R2_q(X, z, beta)
     z = sample_z(X, z, R2, q)
     sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
@@ -150,6 +154,7 @@ def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
 
 
 def make_plots(q, medians, s, R_y):
+    '''Plot posterior median of q and marginal posterior distribution of q for a given dataset'''
     _, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
 
     # Add histograms
