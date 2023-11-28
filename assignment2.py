@@ -5,13 +5,19 @@ from itertools import product
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from scipy import stats
+from sklearn import linear_model
 from scipy import special
+from numba import jit, njit
 
 plt.style.use("fivethirtyeight")
 PARALLEL = False
 
+# deactivate numba for now
+jit = lambda x: x
 
-def sample_one_dataset(k=100, T=200, rho=0.75):
+
+@jit
+def sample_one_dataset(s, R_y, k=100, T=200, rho=0.75, a=1, b=1, A=1, B=1,):
     X = np.zeros((T, k))
     toeplitz_corr = np.zeros((k, k))
 
@@ -21,34 +27,48 @@ def sample_one_dataset(k=100, T=200, rho=0.75):
 
     for t in range(T):
         X[t, :] = np.random.multivariate_normal(np.zeros(k), toeplitz_corr)
-
-    eps = np.random.normal(0, 1, (T, 1))
-
-    return X, eps
-
-
-def generate_datasets(n_datasets=100, parallel=True):
-    if parallel:
-        datasets = Parallel(n_jobs=-1)(
-            delayed(sample_one_dataset)() for _ in tqdm(range(n_datasets))
-        )
-    else:
-        datasets = []
-        for _ in tqdm(range(n_datasets)):
-            datasets.append(sample_one_dataset())
-
-    # Concatenate all datasets
-    X = np.stack([dataset[0] for dataset in datasets], axis=0)
-    eps = np.stack([dataset[1] for dataset in datasets], axis=0)
-
+    
+    # Initialize R2 using beta distribution
+    R2 = stats.beta(A, B).rvs()
+    
+    # Initialize q using beta distribution
+    q = stats.beta(a, b).rvs()
+    
+    # Initialize z as a random vector of s ones and k-s zeros
+    z = np.array([0] * (k - s) + [1] * s)
+    np.random.shuffle(z)
+    
+    # Initialize beta as a random vector of k values
+    beta = (np.random.randn(k) * z).reshape(-1,1)
+    
+    sigma2 = (1 / R_y - 1) / T * np.sum((X @ beta)**2)
+    eps = np.random.multivariate_normal(np.zeros(T), sigma2 * np.eye(T)).reshape(-1, 1)
+    
     # Standardize X and eps
     X = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
     eps = (eps - np.mean(eps)) / np.std(eps)
+    
+    # Sanity checks
+    assert X.shape == (T, k)
+    assert eps.shape == (T, 1)
+    assert beta.shape == (k, 1)
+    assert z.shape == (k,)
+    assert R2 > 0 and R2 < 1
+    assert q > 0 and q < 1
+    assert sigma2 > 0
 
-    return X, eps
+    return X, beta, eps, sigma2, R2, q, z
 
 
-def sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T):
+@jit
+def sample_joint_R2_q(X, z, beta, k=100):
+    
+    def posterior_R2_q(R2, q, a=1, b=1, A=1, B=1):
+        s = int(np.sum(z))
+        vx = np.mean(np.var(X, axis=0))
+        return np.exp(-1/(2*sigma2) * (k*vx*q*(1-R2)) / (R2) * (beta.T @ np.diag(z) @ beta).item()) * q**(s+s/2+a-1) * (1-q)**(k-s+b-1) * R2**(A-1-s/2) * (1-R2)**(s/2+B-1)
+    
+    # Create grid of R2 and q values
     x = np.concatenate([
         np.arange(.001, .1, 0.001),
         np.arange(.1, .9, 0.01),
@@ -57,14 +77,13 @@ def sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T):
     )
     Rs, qs = np.meshgrid(x, x)
     
-    def posterior_R2_q(R2, q, a=1, b=1, A=1, B=1):
-        s = int(np.sum(z))
-        vx = 1/k * np.sum(np.var(X, axis=0))
-        return np.exp(-1/(2*sigma2) * (k*vx*q*(1-R2)) / (R2) * (beta.T @ np.diag(z) @ beta).item()) * q**(s+s/2+a-1) * (1-q)**(k-s+b-1) * R2**(A-1-s/2) * (1-R2)**(s/2+B-1)
-    
+    # Compute posterior
     posterior = posterior_R2_q(Rs, qs)
     # Normalize posterior
     posterior = posterior / np.sum(posterior)
+    
+    # plt.contourf(Rs, qs, posterior)
+    # plt.show()
     
     # Sample R2 and q
     R2 = np.random.choice(Rs.flatten(), p=posterior.flatten())
@@ -72,78 +91,66 @@ def sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T):
     
     return R2, q
 
-
-def sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma):
-    s = int(np.sum(z))
-    # TODO Problem with prob
-    prob = q**s * (1 - q)**(k - s) * (1/gamma**2)**(s/2) * np.linalg.det(W_tilde)**(-1/2) * ((Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat)/2).item()**(-T/2) * special.gamma(T/2)
-    return np.random.binomial(1, prob)
-
-
-def sample_z(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma, n_iter_gibbs=1):
-    for _ in range(n_iter_gibbs):
-        for i in range(z.shape[0]):
-            z[i] = sample_z_i(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma)
+@jit
+def sample_z(X, z, R2, q):
+    '''Sample z using one gibbs iteration'''
+    gamma = np.sqrt(compute_gamma2(X, R2, q))
+    ratio = gamma / (q * (1-q))
+    prob = 1 / (1 + ratio)
+    z = np.random.binomial(1, prob, size=z.shape)
     return z
 
 
-def sample_sigma2(X_tilde, Y_tilde, W_tilde, T):
+@jit
+def compute_gamma2(X, R2, q, k=100):
+    '''Compute gamma^2 using the formula given in the assignment'''
+    vx = np.mean(np.var(X, axis=1))
+    return R2 / ((1 - R2) * k * q * vx)
+
+
+@jit
+def sample_sigma2(X, eps, beta, R2, q, z, T=200):
+    s = int(np.sum(z))
+    X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
+    Y_tilde = (X_tilde @ beta_tilde) + eps
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(X, R2, q)
     beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
     scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
     return stats.invgamma(T / 2, scale=scale).rvs()
 
 
-def sample_beta_tilde(X_tilde, W_tilde, Y_tilde, sigma2):
+@jit
+def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
+    s = int(np.sum(z))
+    X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
+    Y_tilde = (X_tilde @ beta_tilde) + eps
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(X, R2, q)
     W_tilde_inv = np.linalg.inv(W_tilde)
     beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y_tilde
     return np.random.multivariate_normal(beta_tilde_hat.reshape(-1), sigma2 * W_tilde_inv).reshape(-1, 1)
 
 
-def update_vectors(X, eps, z, beta, gamma):
-    s = int(np.sum(z))
-    X_tilde = X[:, z == 1]
-    beta_tilde = beta[z == 1]
-    Y_tilde = (X_tilde @ beta_tilde) + eps
-    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / gamma**2
-    return X_tilde, Y_tilde, W_tilde
+@jit
+def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
+    beta_tilde = sample_beta_tilde(X, eps, beta, R2, q, sigma2, z)
+    beta = np.zeros((k, 1))
+    beta[z == 1] = beta_tilde
+    return beta.reshape(-1, 1)
 
 
-def sample_posterior_marginal_q(X, eps, s, R_y, k=100, T=200, gamma=1e-6):
-    q_chain = []
-    
-    # Initialize values
-    R2 = R_y
-    q = .5
-    z = np.array([0] * (k - s) + [1] * s)
-    np.random.shuffle(z)
-    beta = (np.random.randn(k) * z).reshape(-1,1)
-    sigma2 = (1 / R_y - 1) / T * np.sum((X @ beta)**2)
-    
-    beta_tilde = beta[z == 1]
-    X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta, gamma)
-    beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
-    
-    for iterat in tqdm(range(110_000)):
-        # print(f"iteration: {iterat}")
-        R2, q = sample_joint_R2_q(X, z, beta, R2, q, sigma2, k, T)
-
-        z = sample_z(z, k, q, W_tilde, beta_tilde_hat, Y_tilde, T, gamma)
-
-        X_tilde, Y_tilde, W_tilde = update_vectors(X, eps, z, beta, gamma)
-        
-        sigma2 = sample_sigma2(X_tilde, Y_tilde, W_tilde, T)
-        
-        beta_tilde = sample_beta_tilde(X_tilde, W_tilde, Y_tilde, sigma2)
-        beta = np.zeros((k, 1))
-        beta[z == 1] = beta_tilde
-        
-        q_chain.append(q)
-
-    return np.array(q_chain)[10_000:]
+@jit
+def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
+    R2, q = sample_joint_R2_q(X, z, beta)
+    z = sample_z(X, z, R2, q)
+    sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
+    beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
+    return R2, q, z, sigma2, beta
 
 
 def make_plots(q, medians, s, R_y):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
+    _, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
 
     # Add histograms
     ax1.hist(medians, bins=50, density=True)
@@ -174,26 +181,20 @@ def make_plots(q, medians, s, R_y):
 
 
 if __name__ == "__main__":
-    # Question 1
-    print("Generating datasets...")
-    X, eps = generate_datasets(n_datasets=100)
-    print("Done!")
+    N_datasets = 3
+    N_iter = 20
+    burn_in = 10
+    
+    q_matrix = np.zeros((N_datasets, N_iter))
+    for i in range(N_datasets):
+        for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
+            print(f"Dataset {i}, s={s}, R_y={R_y}")
+            X, beta, eps, sigma2, R2, q, z = sample_one_dataset(s, R_y)
+            for k in tqdm(range(N_iter)):
+                R2, q, z, sigma2, beta = one_gibbs_iteration(X, eps, R_y, q, z, sigma2, beta)
+                q_matrix[i, k] = q
 
-    # Question 2
-    for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
-        posterior_median_q = np.zeros(X.shape[0])
-        q = np.zeros((X.shape[0], 100_000))
-
-        if PARALLEL:
-            q = Parallel(n_jobs=-1)(
-                delayed(sample_posterior_marginal_q)(X[i, :, :], eps[i, :], s, R_y)
-                for i in range(X.shape[0])
-            )
-            q = np.stack(q, axis=0)
-        else:
-            for i in range(X.shape[0]):
-                q[i, :] = sample_posterior_marginal_q(X[i, :, :], eps[i, :], s, R_y)
-
-        posterior_median_q = np.median(q, axis=1)
-
-        make_plots(q[-1, :], posterior_median_q, s, R_y)
+    q_matrix = q_matrix[:, burn_in:]
+    posterior_median_q = np.median(q_matrix, axis=1)
+    # Plot posterior median of q and marginal posterior distribution of q for the last dataset
+    make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
