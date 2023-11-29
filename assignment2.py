@@ -188,11 +188,14 @@ def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
 
 def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
     """Run one iteration of the Gibbs sampler"""
-    R2, q = sample_joint_R2_q(X, z, beta)
-    z = sample_z(X, z, R2, q)
-    sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
-    beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
-    # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
+    try:
+        R2, q = sample_joint_R2_q(X, z, beta)
+        z = sample_z(X, z, R2, q)
+        sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
+        beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
+        # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
+    except:
+        pass
     return R2, q, z, sigma2, beta
 
 
