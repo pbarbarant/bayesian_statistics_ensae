@@ -124,6 +124,8 @@ def sample_z(X, z, R2, q, T=200):
         beta_tilde_1 = np.linalg.inv(W_tilde_1) @ X[:, z_1 == 1].T @ (X @ beta + eps)
         Y_tilde_0 = (X_tilde_0 @ beta_tilde_0) + eps
         Y_tilde_1 = (X_tilde_1 @ beta_tilde_1) + eps
+        
+        # Compute the probability ratio
         ratio = (
             gamma
             * (1 - q)
@@ -135,7 +137,11 @@ def sample_z(X, z, R2, q, T=200):
             )
             ** (T / 2)
         )
+        
+        # Compute the probability of z_i = 1
         prob = 1 / (1 + ratio).item()
+        
+        # Sample z_i
         z[i] = np.random.binomial(1, prob)
     return z
 
