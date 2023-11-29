@@ -126,7 +126,8 @@ def sample_z(X, z, R2, q, T=200):
         Y_tilde_1 = (X_tilde_1 @ beta_tilde_1) + eps
         ratio = (
             gamma
-            / (q * (1 - q))
+            * (1 - q)
+            / q
             * (np.linalg.det(W_tilde_0) / np.linalg.det(W_tilde_1)) ** (-1 / 2)
             * (
                 (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0)
@@ -223,9 +224,9 @@ def make_plots(q, medians, s, R_y):
 
 
 if __name__ == "__main__":
-    N_datasets = 1
-    N_iter = 10
-    burn_in = 1
+    N_datasets = 3
+    N_iter = 100
+    burn_in = 10
 
     for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
         q_matrix = np.zeros((N_datasets, N_iter))
