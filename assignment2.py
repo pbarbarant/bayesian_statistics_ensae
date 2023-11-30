@@ -5,11 +5,15 @@ from itertools import product
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from scipy import stats
-from sklearn import linear_model
-from scipy import special
+from numba import njit
 
-plt.style.use("fivethirtyeight")
-PARALLEL = False
+# Use submitit to run jobs on slurm clusters
+import submitit
+
+log_folder = "logs/%j"
+executor = submitit.AutoExecutor(folder=log_folder)
+
+PARALLEL, CLUSTER = True, False
 
 
 def sample_one_dataset(
@@ -65,24 +69,194 @@ def sample_one_dataset(
     return X, beta, eps, sigma2, R2, q, z
 
 
-def sample_joint_R2_q(X, z, beta, k=100):
-    def posterior_R2_q(R2, q, a=1, b=1, A=1, B=1):
-        s = int(np.sum(z))
-        vx = np.mean(np.var(X, axis=0))
-        return (
-            np.exp(
-                -1
-                / (2 * sigma2)
-                * (k * vx * q * (1 - R2))
-                / (R2)
-                * (beta.T @ np.diag(z) @ beta).item()
-            )
-            * q ** (s + s / 2 + a - 1)
-            * (1 - q) ** (k - s + b - 1)
-            * R2 ** (A - 1 - s / 2)
-            * (1 - R2) ** (s / 2 + B - 1)
-        )
+@njit
+def posterior_R2_q(R2, q, sigma2, beta_tilde_norm, a=1, b=1, A=1, B=1):
+    vx = 1
+    k = 100
+    # Compute the log of the posterior
+    log_posterior = (
+        -1 / (2 * sigma2) * (k * vx * q * (1 - R2)) / (R2) * beta_tilde_norm
+        + (s + s / 2 + a - 1) * np.log(q)
+        + (k - s + b - 1) * np.log(1 - q)
+        + (A - 1 - s / 2) * np.log(R2)
+        + (B - 1 + s / 2) * np.log(1 - R2)
+    )
+    return np.exp(log_posterior)
 
+
+@njit
+def compute_posterior_grid(Rs, qs, z, beta, sigma2):
+    """Compute the posterior on a grid of R2 and q values"""
+    s = int(np.sum(z))
+    # vx = np.mean(np.var(X, axis=0))
+
+    beta_tilde = beta[z == 1]
+    beta_tilde_norm = beta_tilde.T @ beta_tilde
+    # Compute posterior
+    posterior = posterior_R2_q(Rs, qs, sigma2, beta_tilde_norm)
+    # Normalize posterior
+    posterior = posterior / np.sum(posterior)
+    return posterior
+
+
+def sample_joint_R2_q(Rs, qs, z, beta, sigma2):
+    posterior = compute_posterior_grid(Rs, qs, z, beta, sigma2)
+
+    # Sample R2 and q
+    R2 = np.random.choice(Rs.flatten(), p=posterior.flatten())
+    q = np.random.choice(qs.flatten(), p=posterior.flatten())
+
+    return R2, q
+
+
+@njit
+def sample_z(X, eps, beta, z, R2, q):
+    """Sample z using one gibbs iteration"""
+    T = 200
+    gamma = np.sqrt(compute_gamma2(R2, q))
+    Y = (X @ beta) + eps
+    for i in range(z.shape[0]):
+        # Compute W_tilde_0 and W_tilde_1 depending on z_i
+        z[i] = 0
+        X_tilde_0 = X[:, z == 1]
+        W_tilde_0 = X_tilde_0.T @ X_tilde_0 + np.eye(int(np.sum(z))) / gamma**2
+        z[i] = 1
+        X_tilde_1 = X[:, z == 1]
+        W_tilde_1 = X_tilde_1.T @ X_tilde_1 + np.eye(int(np.sum(z))) / gamma**2
+
+        # Fast computation of beta_tilde_0 and beta_tilde_1
+        beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y)
+        beta_tilde_1 = np.linalg.solve(W_tilde_1, X_tilde_1.T @ Y)
+
+        Y_tilde_0 = (X_tilde_0 @ beta_tilde_0) + eps
+        Y_tilde_1 = (X_tilde_1 @ beta_tilde_1) + eps
+
+        # Fast computation of the log-determinant of W_tilde_0 and W_tilde_1
+        log_det_W_tilde_0 = np.trace(np.log(W_tilde_0))
+        log_det_W_tilde_1 = np.trace(np.log(W_tilde_1))
+
+        # # Compute the log of the probability ratio
+        log_ratio = (
+            np.log(gamma)
+            + np.log(1 - q)
+            - np.log(q)
+            - 1 / 2 * log_det_W_tilde_0
+            + 1 / 2 * log_det_W_tilde_1
+            - T
+            / 2
+            * np.log(
+                (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0)
+            )
+            + T
+            / 2
+            * np.log(
+                (Y_tilde_1.T @ Y_tilde_1 - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1)
+            )
+        ).item()
+        # Compute the ratio
+        # ratio = (
+        #     gamma
+        #     * (1 - q)
+        #     / (q)
+        #     * np.sqrt(np.linalg.det(W_tilde_1) / np.linalg.det(W_tilde_0)) ** (-1/2)
+        #     * (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0) ** (
+        #         -T / 2
+        #     )
+        #     * (Y_tilde_1.T @ Y_tilde_1 - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1) ** (
+        #         T / 2
+        #     )
+        # ).item()
+
+        # Compute the probability of z_i = 1
+        ratio = np.exp(log_ratio)
+        prob = 1 / (1 + np.exp(log_ratio))
+
+        # Sample z_i
+        if np.random.rand() < prob:
+            z[i] = 1
+        else:
+            z[i] = 0
+    return z
+
+
+@njit
+def compute_gamma2(R2, q):
+    """Compute gamma^2 using the formula given in the assignment"""
+    # vx = np.mean(np.var(X, axis=1))
+    vx = 1
+    k = 100
+    return R2 / ((1 - R2) * k * q * vx)
+
+
+@njit
+def sample_sigma2_scale(X, eps, beta, R2, q, z):
+    """Sample sigma2 using formula 4"""
+    s = int(np.sum(z))
+    X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
+    Y_tilde = (X_tilde @ beta_tilde) + eps
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
+    # Fast computation of beta_tilde_hat
+    beta_tilde_hat = np.linalg.solve(W_tilde, X_tilde.T @ Y_tilde)
+    scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
+    return scale
+
+
+def sample_sigma2(X, eps, beta, R2, q, z):
+    """Sample sigma2 using formula 4"""
+    T = 200
+    scale = sample_sigma2_scale(X, eps, beta, R2, q, z)
+    return stats.invgamma(T / 2, scale=scale).rvs()
+
+
+@njit
+def sample_beta_tilde_scale(X, eps, beta, R2, q, sigma2, z):
+    """Sample sigma2 using formula 5"""
+    s = int(np.sum(z))
+    X_tilde = X[:, z == 1]
+    beta_tilde = beta[z == 1]
+    Y_tilde = (X_tilde @ beta_tilde) + eps
+    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
+    W_tilde_inv = np.linalg.inv(W_tilde)
+    beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y_tilde
+    mean = beta_tilde_hat.reshape(-1)
+    cov = sigma2 * W_tilde_inv
+    return mean, cov
+
+
+def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
+    """Sample sigma2 using formula 5"""
+    mean, cov = sample_beta_tilde_scale(X, eps, beta, R2, q, sigma2, z)
+    return np.random.multivariate_normal(mean, cov).reshape(-1, 1)
+
+
+def sample_beta(X, eps, beta, R2, q, sigma2, z):
+    """Auxiliary function to sample beta from beta_tilde"""
+    beta_tilde = sample_beta_tilde(X, eps, beta, R2, q, sigma2, z)
+    beta = np.zeros((100, 1))
+    beta[z == 1] = beta_tilde
+    return beta.reshape(-1, 1)
+
+
+def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta, Rs, qs):
+    """Run one iteration of the Gibbs sampler"""
+    R2, q = sample_joint_R2_q(Rs, qs, z, beta, sigma2)
+    sampled_z = sample_z(X, eps, beta, z, R2, q)
+    # If sampled_z is a vector of zeros, we keep the previous value of z
+    if sampled_z.sum() == 0:
+        return R2, q, z, sigma2, beta
+    else:
+        z = sampled_z
+    sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
+    beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
+    # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
+    return R2, q, z, sigma2, beta
+
+
+def compute_one_dataset(R_y, s, N_iter):
+    """Sample one dataset and run the Gibbs sampler for N_iter iterations"""
+    X, beta, eps, sigma2, R2, q, z = sample_one_dataset(s, R_y)
+    q_chain = np.zeros(N_iter)
     # Create grid of R2 and q values
     x = np.concatenate(
         [
@@ -92,115 +266,38 @@ def sample_joint_R2_q(X, z, beta, k=100):
         ]
     )
     Rs, qs = np.meshgrid(x, x)
-
-    # Compute posterior
-    posterior = posterior_R2_q(Rs, qs)
-    # Normalize posterior
-    posterior = posterior / np.sum(posterior)
-
-    # plt.contourf(Rs, qs, posterior)
-    # plt.show()
-
-    # Sample R2 and q
-    R2 = np.random.choice(Rs.flatten(), p=posterior.flatten())
-    q = np.random.choice(qs.flatten(), p=posterior.flatten())
-
-    return R2, q
-
-
-def sample_z(X, z, R2, q, T=200):
-    """Sample z using one gibbs iteration"""
-    for i in range(z.shape[0]):
-        gamma = np.sqrt(compute_gamma2(X, R2, q))
-        z_0 = z.copy()
-        z_1 = z.copy()
-        z_0[i] = 0
-        z_1[i] = 1
-        X_tilde_0 = X[:, z_0 == 1]
-        X_tilde_1 = X[:, z_1 == 1]
-        W_tilde_0 = X_tilde_0.T @ X_tilde_0 + np.eye(np.sum(z_0)) / gamma**2
-        W_tilde_1 = X_tilde_1.T @ X_tilde_1 + np.eye(np.sum(z_1)) / gamma**2
-        beta_tilde_0 = np.linalg.inv(W_tilde_0) @ X[:, z_0 == 1].T @ (X @ beta + eps)
-        beta_tilde_1 = np.linalg.inv(W_tilde_1) @ X[:, z_1 == 1].T @ (X @ beta + eps)
-        Y_tilde_0 = (X_tilde_0 @ beta_tilde_0) + eps
-        Y_tilde_1 = (X_tilde_1 @ beta_tilde_1) + eps
-        
-        # Compute the probability ratio
-        ratio = (
-            gamma
-            * (1 - q)
-            / q
-            * (np.linalg.det(W_tilde_0) / np.linalg.det(W_tilde_1)) ** (-1 / 2)
-            * (
-                (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0)
-                / (Y_tilde_1.T @ Y_tilde_1 - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1)
-            )
-            ** (T / 2)
+    # Run Gibbs sampler
+    for k in range(N_iter):
+        R2, q, z, sigma2, beta = one_gibbs_iteration(
+            X, eps, R2, q, z, sigma2, beta, Rs, qs
         )
-        
-        # Compute the probability of z_i = 1
-        prob = 1 / (1 + ratio).item()
-        
-        # Sample z_i
-        z[i] = np.random.binomial(1, prob)
-    return z
+        q_chain[k] = q
+    return q_chain
 
 
-def compute_gamma2(X, R2, q, k=100):
-    """Compute gamma^2 using the formula given in the assignment"""
-    vx = np.mean(np.var(X, axis=1))
-    return R2 / ((1 - R2) * k * q * vx)
-
-
-def sample_sigma2(X, eps, beta, R2, q, z, T=200):
-    """Sample sigma2 using formula 4"""
-    s = int(np.sum(z))
-    X_tilde = X[:, z == 1]
-    beta_tilde = beta[z == 1]
-    Y_tilde = (X_tilde @ beta_tilde) + eps
-    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(X, R2, q)
-    beta_tilde_hat = np.linalg.inv(W_tilde) @ X_tilde.T @ Y_tilde
-    scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
-    return stats.invgamma(T / 2, scale=scale).rvs()
-
-
-def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
-    """Sample sigma2 using formula 5"""
-    s = int(np.sum(z))
-    X_tilde = X[:, z == 1]
-    beta_tilde = beta[z == 1]
-    Y_tilde = (X_tilde @ beta_tilde) + eps
-    W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(X, R2, q)
-    W_tilde_inv = np.linalg.inv(W_tilde)
-    beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y_tilde
-    return np.random.multivariate_normal(
-        beta_tilde_hat.reshape(-1), sigma2 * W_tilde_inv
-    ).reshape(-1, 1)
-
-
-def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
-    """Auxiliary function to sample beta from beta_tilde"""
-    beta_tilde = sample_beta_tilde(X, eps, beta, R2, q, sigma2, z)
-    beta = np.zeros((k, 1))
-    beta[z == 1] = beta_tilde
-    return beta.reshape(-1, 1)
-
-
-def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
-    """Run one iteration of the Gibbs sampler"""
-    try:
-        R2, q = sample_joint_R2_q(X, z, beta)
-        z = sample_z(X, z, R2, q)
-        sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
-        beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
-        # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
-    except:
-        pass
-    return R2, q, z, sigma2, beta
+def job_wrapper(s, R_y, N_iter, burn_in):
+    q_matrix = np.zeros((N_datasets, N_iter))
+    if PARALLEL:
+        results = Parallel(n_jobs=-1)(
+            delayed(compute_one_dataset)(R_y, s, N_iter)
+            for _ in tqdm(range(N_datasets))
+        )
+        for i, q_chain in enumerate(results):
+            q_matrix[i, :] = q_chain
+    else:
+        for i in range(N_datasets):
+            q_matrix[i, :] = compute_one_dataset(R_y, s, N_iter)
+    q_matrix = q_matrix[:, burn_in:]
+    posterior_median_q = np.median(q_matrix, axis=1)
+    # Save q_matrix
+    np.save(f"q_matrix/s={s}_R_y={int(R_y*100)}.npy", q_matrix)
+    # Plot posterior median of q and marginal posterior distribution of q for the last dataset
+    make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
 
 
 def make_plots(q, medians, s, R_y):
     """Plot posterior median of q and marginal posterior distribution of q for a given dataset"""
+    plt.style.use("fivethirtyeight")
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
 
     # Add histograms
@@ -233,22 +330,32 @@ def make_plots(q, medians, s, R_y):
 
 
 if __name__ == "__main__":
-    N_datasets = 3
-    N_iter = 100
-    burn_in = 10
+    N_datasets = 100
+    N_iter = 110_000
+    burn_in = 10_000
 
-    for s, R_y in product([5, 10, 100], [0.02, 0.25, 0.5]):
-        q_matrix = np.zeros((N_datasets, N_iter))
-        for i in range(N_datasets):
-            print(f"Dataset {i}, s={s}, R_y={R_y}")
-            X, beta, eps, sigma2, R2, q, z = sample_one_dataset(s, R_y)
-            for k in tqdm(range(N_iter)):
-                R2, q, z, sigma2, beta = one_gibbs_iteration(
-                    X, eps, R_y, q, z, sigma2, beta
-                )
-                q_matrix[i, k] = q
+    list_s = [5, 10, 100]
+    list_R_y = [0.02, 0.25, 0.5]
 
-        q_matrix = q_matrix[:, burn_in:]
-        posterior_median_q = np.median(q_matrix, axis=1)
-        # Plot posterior median of q and marginal posterior distribution of q for the last dataset
-        make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
+    if CLUSTER:
+        # Create product of list_s and list_R_y
+        product_s_R_y = np.array(list(product(list_s, list_R_y)))
+        executor = submitit.AutoExecutor(folder=log_folder)
+        executor.update_parameters(
+            # cpus_per_task=N_datasets,
+            slurm_partition="normal",
+            slurm_job_name="gibbs",
+            slurm_time="50:00:00",
+        )
+        jobs = executor.map_array(
+            job_wrapper,
+            product_s_R_y[:, 0],
+            product_s_R_y[:, 1],
+            [N_iter] * len(product_s_R_y),
+            [burn_in] * len(product_s_R_y),
+        )
+
+    else:
+        for s, R_y in product(list_s, list_R_y):
+            print(f"Running simulation with s={s} and R_y={int(R_y*100)}%")
+            job_wrapper(s, R_y, N_iter, burn_in)
