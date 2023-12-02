@@ -85,17 +85,7 @@ def posterior_R2_q(R2, q, beta, vx, sigma2, z, a=1, b=1, A=1, B=1, k=100):
         * (1 - q) ** (k - s + b - 1)
         * R2 ** (A - 1 - s / 2)
         * (1 - R2) ** (s / 2 + B - 1)
-    ).item()
-
-
-@njit
-def compute_posterior_R2_q(X, z, beta, sigma2, grid):
-    vx = compute_vx(X)
-    posterior = np.zeros(grid.shape[0])
-    for i in range(grid.shape[0]):
-        posterior[i] = posterior_R2_q(grid[i, 0], grid[i, 1], beta, vx, sigma2, z)
-    posterior /= np.sum(posterior)
-    return posterior
+    )
 
 
 @jit
@@ -108,18 +98,20 @@ def sample_joint_R2_q(X, z, beta, sigma2):
             np.arange(0.9, 0.999, 0.001),
         ]
     )
-    grid = np.array(np.meshgrid(x, x)).T.reshape(-1, 2)
+    Rs, qs = np.meshgrid(x, x)
+    vx = compute_vx(X)
 
     # Compute posterior
-    posterior = compute_posterior_R2_q(X, z, beta, sigma2, grid)
+    posterior = posterior_R2_q(Rs, qs, beta, vx, sigma2, z)
+    posterior /= np.sum(posterior)
 
     # Plot posterior
     # plt.contourf(Rs, qs, posterior)
     # plt.show()
 
     # Sample R2 and q
-    idx = np.random.choice(np.arange(posterior.shape[0]), p=posterior)
-    R2, q = grid[idx, 0], grid[idx, 1]
+    R2 = np.random.choice(Rs.flatten(), p=posterior.flatten())
+    q = np.random.choice(qs.flatten(), p=posterior.flatten())
 
     return R2, q
 
@@ -257,7 +249,7 @@ def sample_beta(X, eps, beta, R2, q, sigma2, z, k=100):
 def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta):
     """Run one iteration of the Gibbs sampler"""
     R2, q = sample_joint_R2_q(X, z, beta, sigma2)
-    z = sample_z(X, eps, beta, z, R2, q)
+    # z = sample_z(X, eps, beta, z, R2, q)
     sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
     beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
     # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
