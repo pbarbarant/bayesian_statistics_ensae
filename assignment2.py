@@ -349,7 +349,7 @@ if __name__ == "__main__":
         )
         jobs = executor.map_array(
             job_wrapper,
-            product_s_R_y[:, 0],
+            product_s_R_y[:, 0].astype(int),
             product_s_R_y[:, 1],
             [N_iter] * len(product_s_R_y),
             [burn_in] * len(product_s_R_y),
