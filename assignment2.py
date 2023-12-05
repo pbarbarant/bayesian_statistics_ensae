@@ -5,6 +5,8 @@ from itertools import product
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from scipy import stats
+
+# Use numba for just-in-time compilation
 from numba import njit
 
 # Use submitit to run jobs on slurm clusters
@@ -13,7 +15,10 @@ import submitit
 log_folder = "logs/%j"
 executor = submitit.AutoExecutor(folder=log_folder)
 
-PARALLEL, CLUSTER = True, False
+# Set to True to run the computation in parallel
+PARALLEL = True
+# Set to True to run the computation on a slurm cluster
+CLUSTER = True
 
 
 def sample_one_dataset(
