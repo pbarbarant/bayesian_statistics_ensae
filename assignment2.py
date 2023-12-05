@@ -330,7 +330,6 @@ if __name__ == "__main__":
         product_s_R_y = np.array(list(product(list_s, list_R_y)))
         executor = submitit.AutoExecutor(folder=log_folder)
         executor.update_parameters(
-            # cpus_per_task=N_datasets,
             slurm_partition="normal",
             slurm_job_name="gibbs",
             slurm_time="50:00:00",
@@ -342,8 +341,6 @@ if __name__ == "__main__":
             [N_iter] * len(product_s_R_y),
             [burn_in] * len(product_s_R_y),
         )
-
     else:
         for s, R_y in product(list_s, list_R_y):
-            print(f"Running simulation with s={s} and R_y={int(R_y*100)}%")
             job_wrapper(s, R_y, N_iter, burn_in)
