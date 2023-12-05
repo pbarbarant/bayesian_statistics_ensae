@@ -120,9 +120,9 @@ def sample_z(X, eps, beta, z, R2, q):
     """Sample z using one gibbs iteration"""
     T = 200
     gamma = np.sqrt(compute_gamma2(R2, q))
-    Y = (X @ beta) + eps
+    Y_tilde = (X @ beta) + eps
     for i in range(z.shape[0]):
-        # Compute W_tilde_0 and W_tilde_1 depending on z_i
+        # Compute W_tilde_0 and W_tilde_1 depending on z_i state
         z[i] = 0
         X_tilde_0 = X[:, z == 1]
         W_tilde_0 = X_tilde_0.T @ X_tilde_0 + np.eye(int(np.sum(z))) / gamma**2
@@ -131,15 +131,12 @@ def sample_z(X, eps, beta, z, R2, q):
         W_tilde_1 = X_tilde_1.T @ X_tilde_1 + np.eye(int(np.sum(z))) / gamma**2
 
         # Fast computation of beta_tilde_0 and beta_tilde_1
-        beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y)
-        beta_tilde_1 = np.linalg.solve(W_tilde_1, X_tilde_1.T @ Y)
-
-        Y_tilde_0 = (X_tilde_0 @ beta_tilde_0) + eps
-        Y_tilde_1 = (X_tilde_1 @ beta_tilde_1) + eps
+        beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y_tilde)
+        beta_tilde_1 = np.linalg.solve(W_tilde_1, X_tilde_1.T @ Y_tilde)
 
         # Fast computation of the log-determinant of W_tilde_0 and W_tilde_1
-        log_det_W_tilde_0 = np.trace(np.log(W_tilde_0))
-        log_det_W_tilde_1 = np.trace(np.log(W_tilde_1))
+        log_det_W_tilde_0 = np.linalg.slogdet(W_tilde_0)[1]
+        log_det_W_tilde_1 = np.linalg.slogdet(W_tilde_1)[1]
 
         # # Compute the log of the probability ratio
         log_ratio = (
@@ -150,31 +147,13 @@ def sample_z(X, eps, beta, z, R2, q):
             + 1 / 2 * log_det_W_tilde_1
             - T
             / 2
-            * np.log(
-                (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0)
-            )
+            * np.log((Y_tilde.T @ Y_tilde - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0))
             + T
             / 2
-            * np.log(
-                (Y_tilde_1.T @ Y_tilde_1 - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1)
-            )
+            * np.log((Y_tilde.T @ Y_tilde - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1))
         ).item()
-        # Compute the ratio
-        # ratio = (
-        #     gamma
-        #     * (1 - q)
-        #     / (q)
-        #     * np.sqrt(np.linalg.det(W_tilde_1) / np.linalg.det(W_tilde_0)) ** (-1/2)
-        #     * (Y_tilde_0.T @ Y_tilde_0 - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0) ** (
-        #         -T / 2
-        #     )
-        #     * (Y_tilde_1.T @ Y_tilde_1 - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1) ** (
-        #         T / 2
-        #     )
-        # ).item()
 
         # Compute the probability of z_i = 1
-        ratio = np.exp(log_ratio)
         prob = 1 / (1 + np.exp(log_ratio))
 
         # Sample z_i
