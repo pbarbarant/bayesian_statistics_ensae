@@ -167,19 +167,17 @@ def sample_z(X, eps, beta, z, R2, q):
 @njit
 def compute_gamma2(R2, q):
     """Compute gamma^2 using the formula given in the assignment"""
-    # vx = np.mean(np.var(X, axis=1))
-    vx = 1
+    vx = 1  # X is standardized
     k = 100
     return R2 / ((1 - R2) * k * q * vx)
 
 
 @njit
 def sample_sigma2_scale(X, eps, beta, R2, q, z):
-    """Sample sigma2 using formula 4"""
+    """Sample sigma2 scale"""
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
-    beta_tilde = beta[z == 1]
-    Y_tilde = (X_tilde @ beta_tilde) + eps
+    Y_tilde = (X @ beta) + eps
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
     # Fast computation of beta_tilde_hat
     beta_tilde_hat = np.linalg.solve(W_tilde, X_tilde.T @ Y_tilde)
@@ -195,12 +193,11 @@ def sample_sigma2(X, eps, beta, R2, q, z):
 
 
 @njit
-def sample_beta_tilde_scale(X, eps, beta, R2, q, sigma2, z):
-    """Sample sigma2 using formula 5"""
+def sample_beta_tilde_param(X, eps, beta, R2, q, sigma2, z):
+    """Sample beta_tilde mean and covariance matrix"""
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
-    beta_tilde = beta[z == 1]
-    Y_tilde = (X_tilde @ beta_tilde) + eps
+    Y_tilde = (X @ beta) + eps
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
     W_tilde_inv = np.linalg.inv(W_tilde)
     beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y_tilde
@@ -210,8 +207,8 @@ def sample_beta_tilde_scale(X, eps, beta, R2, q, sigma2, z):
 
 
 def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
-    """Sample sigma2 using formula 5"""
-    mean, cov = sample_beta_tilde_scale(X, eps, beta, R2, q, sigma2, z)
+    """Sample beta_tilde using formula 5"""
+    mean, cov = sample_beta_tilde_param(X, eps, beta, R2, q, sigma2, z)
     return np.random.multivariate_normal(mean, cov).reshape(-1, 1)
 
 
@@ -234,7 +231,6 @@ def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta, Rs, qs):
         z = sampled_z
     sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
     beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
-    # print(f"R2={R2:.3f}, q={q:.3f}, sigma2={sigma2:.3f}")
     return R2, q, z, sigma2, beta
 
 
