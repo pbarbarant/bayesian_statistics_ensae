@@ -32,6 +32,7 @@ def sample_one_dataset(
     A=1,
     B=1,
 ):
+    '''Sample one dataset from the model'''
     X = np.zeros((T, k))
     toeplitz_corr = np.zeros((k, k))
 
@@ -75,12 +76,13 @@ def sample_one_dataset(
 
 
 @njit
-def posterior_R2_q(R2, q, sigma2, beta_tilde_norm, a=1, b=1, A=1, B=1):
-    vx = 1
+def posterior_R2_q(R2, q, sigma2, beta_tilde_norm2, s, a=1, b=1, A=1, B=1):
+    """Auxiliary function to compute the posterior on a grid of R2 and q values"""
+    vx = 1  # X is standardized
     k = 100
     # Compute the log of the posterior
     log_posterior = (
-        -1 / (2 * sigma2) * (k * vx * q * (1 - R2)) / (R2) * beta_tilde_norm
+        -1 / (2 * sigma2) * (k * vx * q * (1 - R2)) / (R2) * beta_tilde_norm2
         + (s + s / 2 + a - 1) * np.log(q)
         + (k - s + b - 1) * np.log(1 - q)
         + (A - 1 - s / 2) * np.log(R2)
