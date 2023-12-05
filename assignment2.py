@@ -95,24 +95,23 @@ def posterior_R2_q(R2, q, sigma2, beta_tilde_norm2, s, a=1, b=1, A=1, B=1):
 def compute_posterior_grid(Rs, qs, z, beta, sigma2):
     """Compute the posterior on a grid of R2 and q values"""
     s = int(np.sum(z))
-    # vx = np.mean(np.var(X, axis=0))
-
     beta_tilde = beta[z == 1]
-    beta_tilde_norm = beta_tilde.T @ beta_tilde
+    beta_tilde_norm2 = beta_tilde.T @ beta_tilde
     # Compute posterior
-    posterior = posterior_R2_q(Rs, qs, sigma2, beta_tilde_norm)
-    # Normalize posterior
-    posterior = posterior / np.sum(posterior)
+    posterior = posterior_R2_q(Rs, qs, sigma2, beta_tilde_norm2, s)
     return posterior
 
 
 def sample_joint_R2_q(Rs, qs, z, beta, sigma2):
+    """Sample R2 and q jointly using the posterior on a grid of R2 and q values""" ""
     posterior = compute_posterior_grid(Rs, qs, z, beta, sigma2)
-
+    # Normalize posterior
+    posterior = posterior / np.sum(posterior)
     # Sample R2 and q
-    R2 = np.random.choice(Rs.flatten(), p=posterior.flatten())
-    q = np.random.choice(qs.flatten(), p=posterior.flatten())
-
+    random_idx = np.random.choice(posterior.size, p=posterior.flatten())
+    R2_idx, q_idx = np.unravel_index(random_idx, posterior.shape)
+    R2 = Rs[R2_idx, q_idx]
+    q = qs[R2_idx, q_idx]
     return R2, q
 
 
