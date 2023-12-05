@@ -303,7 +303,7 @@ def make_plots(q, medians, s, R_y):
     ax2.set_xlabel("q")
     ax2.set_ylabel("Density")
     ax2.set_title(
-        f"Histogram of marginal posterior distribution of q\nwith s={s} and R_y={int(R_y*100)}% (last dataset)"
+        f"Histogram of marginal posterior distribution of q\nwith s={s} and R_y={int(R_y*100)}% (Dataset 70)"
     )
     ax2.legend()
     # plt.show()
