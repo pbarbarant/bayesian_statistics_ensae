@@ -285,7 +285,6 @@ def job_wrapper(s, R_y, N_iter, burn_in):
 
 def make_plots(q, medians, s, R_y):
     """Plot posterior median of q and marginal posterior distribution of q for a given dataset"""
-    plt.style.use("fivethirtyeight")
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
 
     # Add histograms
