@@ -257,16 +257,23 @@ def compute_one_dataset(R_y, s, N_iter):
 
 
 def job_wrapper(s, R_y, N_iter, burn_in):
+    print(f"Running simulation with s={s} and R_y={int(R_y*100)}%")
+    print(f"Number of iterations: {N_iter}")
+    print(f"Burn-in: {burn_in}")
     q_matrix = np.zeros((N_datasets, N_iter))
     if PARALLEL:
         results = Parallel(n_jobs=-1)(
             delayed(compute_one_dataset)(R_y, s, N_iter)
-            for _ in tqdm(range(N_datasets))
+            for _ in tqdm(
+                range(N_datasets), desc=f"s={s} and R_y={int(R_y*100)}%", position=0
+            )
         )
         for i, q_chain in enumerate(results):
             q_matrix[i, :] = q_chain
     else:
-        for i in range(N_datasets):
+        for i in tqdm(
+            range(N_datasets), desc=f"s={s} and R_y={int(R_y*100)}%", position=0
+        ):
             q_matrix[i, :] = compute_one_dataset(R_y, s, N_iter)
     q_matrix = q_matrix[:, burn_in:]
     posterior_median_q = np.median(q_matrix, axis=1)
