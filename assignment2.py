@@ -320,8 +320,8 @@ def make_plots(q, medians, s, R_y):
 
 if __name__ == "__main__":
     N_datasets = 100
-    N_iter = 110_000
-    burn_in = 10_000
+    N_iter = 5_000
+    burn_in = 1_000
 
     list_s = [5, 10, 100]
     list_R_y = [0.02, 0.25, 0.5]
