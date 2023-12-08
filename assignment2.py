@@ -32,7 +32,7 @@ def sample_one_dataset(
     A=1,
     B=1,
 ):
-    '''Sample one dataset from the model'''
+    """Sample one dataset from the model"""
     X = np.zeros((T, k))
     toeplitz_corr = np.zeros((k, k))
 
@@ -57,7 +57,9 @@ def sample_one_dataset(
     beta = (np.random.randn(k) * z).reshape(-1, 1)
 
     sigma2 = (1 / R_y - 1) / T * np.sum((X @ beta) ** 2)
-    eps = np.random.multivariate_normal(np.zeros(T), sigma2 * np.eye(T)).reshape(-1, 1)
+    eps = np.random.multivariate_normal(
+        np.zeros(T), sigma2 * np.eye(T)
+    ).reshape(-1, 1)
 
     # Standardize X and eps
     X = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
@@ -77,7 +79,9 @@ def sample_one_dataset(
 
 @njit
 def posterior_R2_q(R2, q, sigma2, beta_tilde_norm2, s, a=1, b=1, A=1, B=1):
-    """Auxiliary function to compute the posterior on a grid of R2 and q values"""
+    """
+    Auxiliary function to compute the posterior on a grid of R2 and q values
+    """
     vx = 1  # X is standardized
     k = 100
     # Compute the log of the posterior
@@ -103,7 +107,9 @@ def compute_posterior_grid(Rs, qs, z, beta, sigma2):
 
 
 def sample_joint_R2_q(Rs, qs, z, beta, sigma2):
-    """Sample R2 and q jointly using the posterior on a grid of R2 and q values""" ""
+    """
+    Sample R2 and q jointly using the posterior on a grid of R2 and q values
+    """
     posterior = compute_posterior_grid(Rs, qs, z, beta, sigma2)
     # Normalize posterior
     posterior = posterior / np.sum(posterior)
@@ -125,10 +131,14 @@ def sample_z(X, eps, beta, z, R2, q):
         # Compute W_tilde_0 and W_tilde_1 depending on z_i state
         z[i] = 0
         X_tilde_0 = X[:, z == 1]
-        W_tilde_0 = X_tilde_0.T @ X_tilde_0 + np.eye(int(np.sum(z))) / gamma**2
+        W_tilde_0 = (
+            X_tilde_0.T @ X_tilde_0 + np.eye(int(np.sum(z))) / gamma**2
+        )
         z[i] = 1
         X_tilde_1 = X[:, z == 1]
-        W_tilde_1 = X_tilde_1.T @ X_tilde_1 + np.eye(int(np.sum(z))) / gamma**2
+        W_tilde_1 = (
+            X_tilde_1.T @ X_tilde_1 + np.eye(int(np.sum(z))) / gamma**2
+        )
 
         # Fast computation of beta_tilde_0 and beta_tilde_1
         beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y_tilde)
@@ -140,15 +150,25 @@ def sample_z(X, eps, beta, z, R2, q):
 
         # # Compute the log of the probability ratio
         log_ratio = (
-            np.log(gamma * (1-q) / q)
+            np.log(gamma * (1 - q) / q)
             - 1 / 2 * log_det_W_tilde_0
             + 1 / 2 * log_det_W_tilde_1
             - T
             / 2
-            * np.log((Y_tilde.T @ Y_tilde - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0))
+            * np.log(
+                (
+                    Y_tilde.T @ Y_tilde
+                    - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0
+                )
+            )
             + T
             / 2
-            * np.log((Y_tilde.T @ Y_tilde - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1))
+            * np.log(
+                (
+                    Y_tilde.T @ Y_tilde
+                    - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1
+                )
+            )
         ).item()
 
         # Compute the probability of state z_i = 1
@@ -178,7 +198,9 @@ def sample_sigma2_scale(X, eps, beta, R2, q, z):
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
     # Fast computation of beta_tilde_hat
     beta_tilde_hat = np.linalg.solve(W_tilde, X_tilde.T @ Y_tilde)
-    scale = (Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
+    scale = (
+        Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat
+    ) / 2
     return scale
 
 
@@ -262,26 +284,34 @@ def job_wrapper(s, R_y, N_iter, burn_in):
         results = Parallel(n_jobs=-1)(
             delayed(compute_one_dataset)(R_y, s, N_iter)
             for _ in tqdm(
-                range(N_datasets), desc=f"s={s} and R_y={int(R_y*100)}%", position=0
+                range(N_datasets),
+                desc=f"s={s} and R_y={int(R_y*100)}%",
+                position=0,
             )
         )
         for i, q_chain in enumerate(results):
             q_matrix[i, :] = q_chain
     else:
         for i in tqdm(
-            range(N_datasets), desc=f"s={s} and R_y={int(R_y*100)}%", position=0
+            range(N_datasets),
+            desc=f"s={s} and R_y={int(R_y*100)}%",
+            position=0,
         ):
             q_matrix[i, :] = compute_one_dataset(R_y, s, N_iter)
     q_matrix = q_matrix[:, burn_in:]
     posterior_median_q = np.median(q_matrix, axis=1)
     # Save q_matrix
     np.save(f"q_matrix/s={s}_R_y={int(R_y*100)}.npy", q_matrix)
-    # Plot posterior median of q and marginal posterior distribution of q for the last dataset
+    # Plot posterior median of q and marginal posterior
+    # distribution of q for the last dataset
     make_plots(q_matrix[-1, :], posterior_median_q, s, R_y)
 
 
 def make_plots(q, medians, s, R_y):
-    """Plot posterior median of q and marginal posterior distribution of q for a given dataset"""
+    """
+    Plot posterior median of q and marginal
+    posterior distribution of q for a given dataset
+    """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 4))
     # Add histograms
     ax1.hist(np.round(medians, decimals=2), bins=20, density=True, alpha=0.5)
@@ -291,7 +321,8 @@ def make_plots(q, medians, s, R_y):
         (np.round(medians, decimals=2).max()),
         1,
         np.round(medians, decimals=2).max(),
-        color="red", size=15
+        color="red",
+        size=15,
     )
     # Add kernel density estimations for q marginal posterior distribution
     kde = stats.gaussian_kde(q)
@@ -302,13 +333,15 @@ def make_plots(q, medians, s, R_y):
     ax1.set_xlabel("Posterior median of q")
     ax1.set_ylabel("Density")
     ax1.set_title(
-        f"Histogram of posterior median of q\nwith s={s} and R_y={int(R_y*100)}%"
+        f"Histogram of posterior median of q\nwith s={s} and"
+        f" R_y={int(R_y*100)}%"
     )
     ax1.legend()
     ax2.set_xlabel("q")
     ax2.set_ylabel("Density")
     ax2.set_title(
-        f"Histogram of marginal posterior distribution of q\nwith s={s} and R_y={int(R_y*100)}% (Dataset 70)"
+        f"Histogram of marginal posterior distribution of q\nwith s={s} and"
+        f" R_y={int(R_y*100)}% (Dataset 70)"
     )
     ax2.legend()
     fig.savefig(f"figures/s={s}_R_y={int(R_y*100)}.png")
