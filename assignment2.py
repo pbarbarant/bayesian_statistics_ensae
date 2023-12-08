@@ -285,19 +285,21 @@ def job_wrapper(s, R_y, N_iter, burn_in):
 
 def make_plots(q, medians, s, R_y):
     """Plot posterior median of q and marginal posterior distribution of q for a given dataset"""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
-
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 4))
     # Add histograms
-    ax1.hist(np.round(medians, decimals=3), bins=100, density=True)
-    ax2.hist(q, bins=100, density=True)
-
+    ax1.hist(np.round(medians, decimals=2), bins=20, density=True, alpha=0.5)
+    ax2.hist(q, bins=40, density=True, alpha=0.5)
+    # Add the maximum on the plot
+    ax1.text(
+        (np.round(medians, decimals=2).max()),
+        1,
+        np.round(medians, decimals=2).max(),
+        color="red", size=15
+    )
     # Add kernel density estimations for q marginal posterior distribution
     kde = stats.gaussian_kde(q)
     x = np.linspace(q.min(), q.max(), 1000)
-    ax2.plot(x, kde(x), label="KDE")
-
-    # Add vertical lines for the median of q on ax2
-    ax2.axvline(np.median(q), color="black", label="Empirical median")
+    ax2.plot(x, kde(x), label="KDE", color="red")
 
     # Add labels and titles
     ax1.set_xlabel("Posterior median of q")
