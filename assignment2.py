@@ -140,9 +140,7 @@ def sample_z(X, eps, beta, z, R2, q):
 
         # # Compute the log of the probability ratio
         log_ratio = (
-            np.log(gamma)
-            + np.log(1 - q)
-            - np.log(q)
+            np.log(gamma * (1-q) / q)
             - 1 / 2 * log_det_W_tilde_0
             + 1 / 2 * log_det_W_tilde_1
             - T
@@ -153,9 +151,8 @@ def sample_z(X, eps, beta, z, R2, q):
             * np.log((Y_tilde.T @ Y_tilde - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1))
         ).item()
 
-        # Compute the probability of z_i = 1
+        # Compute the probability of state z_i = 1
         prob = 1 / (1 + np.exp(log_ratio))
-
         # Sample z_i
         if np.random.rand() < prob:
             z[i] = 1
