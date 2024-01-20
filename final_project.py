@@ -14,7 +14,7 @@ from utils import (
 
 
 def init_params(X, y):
-    """Initialize parameters for Gibbs sampler"""
+    """Initialize parameters for the Gibbs sampler"""
     T, k = X.shape
 
     # Initialize q using beta distribution
@@ -45,14 +45,14 @@ def init_params(X, y):
 
 
 def gibbs_sampling(X, y, N_iter):
-    """Sample one dataset and run the Gibbs sampler for N_iter iterations"""
+    """Run the Gibbs sampler for N_iter iterations"""
     # Initialize parameters
     q_chain = np.zeros(N_iter)
     y_pred = np.zeros((N_iter, y.shape[0]))
     beta, sigma2, R2, q, z, k, T = init_params(X, y)
 
     # Create grid of R2 and q values
-    x = np.arange(0.1, 0.9, 0.01)
+    x = np.arange(0.01, 0.99, 0.01)
     Rs, qs = np.meshgrid(x, x)
     # Run Gibbs sampler
     for i in tqdm(range(N_iter)):
@@ -61,11 +61,12 @@ def gibbs_sampling(X, y, N_iter):
         )
         q_chain[i] = q
         y_pred[i] = (X @ beta).reshape(-1)
-        # print(f"R2: {R2:.4f}, q: {q:.4f}")
     return q_chain, y_pred, beta
 
 
 if __name__ == "__main__":
+    N_iter, burn_in = 1100, 100
+
     df, timestamp = preprocess_dataset()
     X = df.iloc[1:, :-1].values
     y = df.iloc[1:, -1].values.reshape(-1, 1)
@@ -76,9 +77,14 @@ if __name__ == "__main__":
     y = scaler.fit_transform(y)
 
     # Run Gibbs sampler
-    N_iter = 100
     q_chain, y_pred, beta = gibbs_sampling(X, y, N_iter)
+    # Remove burn-in
+    q_chain = q_chain[burn_in:]
+    y_pred = y_pred[burn_in:]
+
+    # Get credible regions
     cr = credible_regions(y_pred)
+    # Rescale y, y_pred, and cr
     cr = scaler.inverse_transform(cr)
     y = scaler.inverse_transform(y)
     y_pred = scaler.inverse_transform(y_pred)
@@ -101,5 +107,5 @@ if __name__ == "__main__":
         title="Rate of Change in Industrial Production Index (INDPRO)\n Actual vs. Predicted Values using Bayesian Regression",
     )
 
-    # Plot distribution of q
+    # Plot posterior distribution of q
     plot_distribution(q_chain)
