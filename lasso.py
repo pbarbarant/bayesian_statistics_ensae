@@ -1,5 +1,7 @@
 # %%
 import pandas as pd
+import numpy as np
+from scipy import stats
 from sklearn import linear_model
 from sklearn.preprocessing import StandardScaler
 
@@ -15,20 +17,25 @@ if __name__ == "__main__":
     # Run lasso with 10-fold cross validation
     lasso = linear_model.LassoCV(cv=10).fit(X, y)
 
-    # Print R^2
+    # Get predictions and confidence intervals
+    pred = lasso.predict(X)
+    ci = confidence_interval(y, pred, X)
     df_lasso = pd.DataFrame(
-        {"Variable": df.columns[:-1], "Coefficient": lasso.coef_}
+        {
+            "Variable": df.columns[:-1],
+            "Coefficient": lasso.coef_,
+            "Standard Error": stats.sem(lasso.coef_),
+            "p-value": stats.t.sf(
+                np.abs(lasso.coef_) / stats.sem(lasso.coef_), len(X) - 1
+            ),
+        },
+        index=df.columns[:-1],
     )
+
     # Save non-zero coefficients to csv with no index
     df_lasso[df_lasso["Coefficient"] != 0].to_csv(
         "coefficients/lasso.csv", index=False
     )
-
-    # Do prediction for INDPRO_RATE with confidence interval
-    # Get prediction
-    pred = lasso.predict(X)
-    ci = confidence_interval(y, pred, X)
-
     plot_INDPRO_RATE(
         actual=df["INDPRO_RATE"][1:],
         pred=pred,
