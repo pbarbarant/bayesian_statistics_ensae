@@ -24,9 +24,7 @@ def preprocess_dataset():
 def confidence_interval(y, pred, X):
     # Get confidence interval
     alpha = 0.05
-    n = len(y)
-    p = X.shape[1]
-    # Get t-value
+    n, p = X.shape
     t = 1 - alpha / 2
     # Get standard error
     se = np.sqrt(np.sum((y - pred) ** 2) / (n - p - 1))
@@ -61,7 +59,7 @@ def plot_INDPRO_RATE(actual, pred, ci, timestamp, regions="ci", title=""):
             ci[0],
             ci[1],
             alpha=0.4,
-            label="95% Confidence\nRegion",
+            label="95% Credible\nInterval",
         )
     else:
         raise ValueError("regions must be either 'ci' or 'cr'")
