@@ -7,7 +7,6 @@ from utils import preprocess_dataset, confidence_interval, plot_INDPRO_RATE
 
 if __name__ == "__main__":
     df, timestamp = preprocess_dataset()
-    # Regress INDPRO_RATE on all other variables using lasso
     X = df.iloc[1:, :-1]
     y = df.iloc[1:, -1]
     # Standardize X
