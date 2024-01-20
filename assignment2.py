@@ -1,16 +1,15 @@
 # %%
-import numpy as np
-import matplotlib.pyplot as plt
 from itertools import product
-from tqdm import tqdm
-from joblib import Parallel, delayed
-from scipy import stats
 
-# Use numba for just-in-time compilation
-from numba import njit
-
+import matplotlib.pyplot as plt
+import numpy as np
 # Use submitit to run jobs on slurm clusters
 import submitit
+from joblib import Parallel, delayed
+# Use numba for just-in-time compilation
+from numba import njit
+from scipy import stats
+from tqdm import tqdm
 
 log_folder = "logs/%j"
 executor = submitit.AutoExecutor(folder=log_folder)

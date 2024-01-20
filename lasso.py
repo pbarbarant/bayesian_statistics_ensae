@@ -2,8 +2,8 @@
 import pandas as pd
 from sklearn import linear_model
 from sklearn.preprocessing import StandardScaler
-from utils import preprocess_dataset, confidence_interval, plot_INDPRO_RATE
 
+from utils import confidence_interval, plot_INDPRO_RATE, preprocess_dataset
 
 if __name__ == "__main__":
     df, timestamp = preprocess_dataset()

@@ -1,16 +1,13 @@
 # %%
-import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
-from assignment2 import one_gibbs_iteration
-from tqdm import tqdm
+import pandas as pd
 from scipy import stats
-from utils import (
-    plot_distribution,
-    credible_regions,
-    preprocess_dataset,
-    plot_INDPRO_RATE,
-)
+from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+
+from assignment2 import one_gibbs_iteration
+from utils import (credible_regions, plot_distribution, plot_INDPRO_RATE,
+                   preprocess_dataset)
 
 
 def init_params(X, y):
