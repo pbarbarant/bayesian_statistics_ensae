@@ -6,8 +6,12 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from assignment2 import one_gibbs_iteration
-from utils import (credible_regions, plot_distribution, plot_INDPRO_RATE,
-                   preprocess_dataset)
+from utils import (
+    credible_regions,
+    plot_distribution,
+    plot_INDPRO_RATE,
+    preprocess_dataset,
+)
 
 
 def init_params(X, y):
@@ -45,7 +49,7 @@ def gibbs_sampling(X, y, N_iter):
     """Run the Gibbs sampler for N_iter iterations"""
     # Initialize parameters
     q_chain = np.zeros(N_iter)
-    y_pred = np.zeros((N_iter, y.shape[0]))
+    y_pred_chain = np.zeros((N_iter, y.shape[0]))
     beta, sigma2, R2, q, z, k, T = init_params(X, y)
 
     # Create grid of R2 and q values
@@ -57,8 +61,8 @@ def gibbs_sampling(X, y, N_iter):
             X, y, R2, q, z, sigma2, beta, Rs, qs, k, T
         )
         q_chain[i] = q
-        y_pred[i] = (X @ beta).reshape(-1)
-    return q_chain, y_pred, beta
+        y_pred_chain[i] = (X @ beta).reshape(-1)
+    return q_chain, y_pred_chain, beta
 
 
 if __name__ == "__main__":
@@ -81,13 +85,18 @@ if __name__ == "__main__":
 
     # Get credible regions
     cr = credible_regions(y_pred)
+
     # Rescale y, y_pred, and cr
     cr = scaler.inverse_transform(cr)
     y = scaler.inverse_transform(y)
     y_pred = scaler.inverse_transform(y_pred)
 
     df_gibbs = pd.DataFrame(
-        {"Variable": df.columns[:-1], "Coefficient": beta.flatten()}
+        {
+            "Variable": df.columns[:-1],
+            "Coefficient": beta.flatten(),
+        },
+        index=df.columns[:-1],
     )
     # Save non-zero coefficients to csv with no index
     df_gibbs[df_gibbs["Coefficient"] != 0].to_csv(
