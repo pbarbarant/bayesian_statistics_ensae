@@ -122,11 +122,9 @@ def sample_joint_R2_q(Rs, qs, z, beta, sigma2):
 
 
 @njit
-def sample_z(X, eps, beta, z, R2, q):
+def sample_z(X, Y, z, R2, q, T):
     """Sample z using one gibbs iteration"""
-    T = 200
     gamma = np.sqrt(compute_gamma2(R2, q))
-    Y_tilde = (X @ beta) + eps
     for i in range(z.shape[0]):
         # Compute W_tilde_0 and W_tilde_1 depending on z_i state
         z[i] = 0
@@ -141,8 +139,8 @@ def sample_z(X, eps, beta, z, R2, q):
         )
 
         # Fast computation of beta_tilde_0 and beta_tilde_1
-        beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y_tilde)
-        beta_tilde_1 = np.linalg.solve(W_tilde_1, X_tilde_1.T @ Y_tilde)
+        beta_tilde_0 = np.linalg.solve(W_tilde_0, X_tilde_0.T @ Y)
+        beta_tilde_1 = np.linalg.solve(W_tilde_1, X_tilde_1.T @ Y)
 
         # Fast computation of the log-determinant of W_tilde_0 and W_tilde_1
         log_det_W_tilde_0 = np.linalg.slogdet(W_tilde_0)[1]
@@ -155,29 +153,20 @@ def sample_z(X, eps, beta, z, R2, q):
             + 1 / 2 * log_det_W_tilde_1
             - T
             / 2
-            * np.log(
-                (
-                    Y_tilde.T @ Y_tilde
-                    - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0
-                )
-            )
+            * np.log((Y.T @ Y - beta_tilde_0.T @ W_tilde_0 @ beta_tilde_0))
             + T
             / 2
-            * np.log(
-                (
-                    Y_tilde.T @ Y_tilde
-                    - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1
-                )
-            )
+            * np.log((Y.T @ Y - beta_tilde_1.T @ W_tilde_1 @ beta_tilde_1))
         ).item()
 
         # Compute the probability of state z_i = 1
         prob = 1 / (1 + np.exp(log_ratio))
         # Sample z_i
-        if np.random.rand() < prob:
+        if np.random.rand() > prob:
             z[i] = 1
         else:
             z[i] = 0
+    # print(f"Number of non-zero coefficients: {np.sum(z)}")
     return z
 
 
@@ -190,66 +179,61 @@ def compute_gamma2(R2, q):
 
 
 @njit
-def sample_sigma2_scale(X, eps, beta, R2, q, z):
+def sample_sigma2_scale(X, Y, R2, q, z):
     """Sample sigma2 scale"""
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
-    Y_tilde = (X @ beta) + eps
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
     # Fast computation of beta_tilde_hat
-    beta_tilde_hat = np.linalg.solve(W_tilde, X_tilde.T @ Y_tilde)
-    scale = (
-        Y_tilde.T @ Y_tilde - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat
-    ) / 2
+    beta_tilde_hat = np.linalg.solve(W_tilde, X_tilde.T @ Y)
+    scale = (Y.T @ Y - beta_tilde_hat.T @ W_tilde @ beta_tilde_hat) / 2
     return scale
 
 
-def sample_sigma2(X, eps, beta, R2, q, z):
+def sample_sigma2(X, Y, R2, q, z, T):
     """Sample sigma2 using formula 4"""
-    T = 200
-    scale = sample_sigma2_scale(X, eps, beta, R2, q, z)
+    scale = sample_sigma2_scale(X, Y, R2, q, z)
     return stats.invgamma(T / 2, scale=scale).rvs()
 
 
 @njit
-def sample_beta_tilde_param(X, eps, beta, R2, q, sigma2, z):
+def sample_beta_tilde_param(X, Y, R2, q, sigma2, z):
     """Sample beta_tilde mean and covariance matrix"""
     s = int(np.sum(z))
     X_tilde = X[:, z == 1]
-    Y_tilde = (X @ beta) + eps
     W_tilde = X_tilde.T @ X_tilde + np.eye(s) / compute_gamma2(R2, q)
     W_tilde_inv = np.linalg.inv(W_tilde)
-    beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y_tilde
+    beta_tilde_hat = W_tilde_inv @ X_tilde.T @ Y
     mean = beta_tilde_hat.reshape(-1)
     cov = sigma2 * W_tilde_inv
     return mean, cov
 
 
-def sample_beta_tilde(X, eps, beta, R2, q, sigma2, z):
+def sample_beta_tilde(X, Y, R2, q, sigma2, z):
     """Sample beta_tilde using formula 5"""
-    mean, cov = sample_beta_tilde_param(X, eps, beta, R2, q, sigma2, z)
+    mean, cov = sample_beta_tilde_param(X, Y, R2, q, sigma2, z)
     return np.random.multivariate_normal(mean, cov).reshape(-1, 1)
 
 
-def sample_beta(X, eps, beta, R2, q, sigma2, z):
+def sample_beta(X, Y, R2, q, sigma2, z, k):
     """Auxiliary function to sample beta from beta_tilde"""
-    beta_tilde = sample_beta_tilde(X, eps, beta, R2, q, sigma2, z)
-    beta = np.zeros((100, 1))
+    beta_tilde = sample_beta_tilde(X, Y, R2, q, sigma2, z)
+    beta = np.zeros((k, 1))
     beta[z == 1] = beta_tilde
     return beta.reshape(-1, 1)
 
 
-def one_gibbs_iteration(X, eps, R2, q, z, sigma2, beta, Rs, qs):
+def one_gibbs_iteration(X, Y, R2, q, z, sigma2, beta, Rs, qs, k, T):
     """Run one iteration of the Gibbs sampler"""
     R2, q = sample_joint_R2_q(Rs, qs, z, beta, sigma2)
-    sampled_z = sample_z(X, eps, beta, z, R2, q)
-    # If sampled_z is a vector of zeros, we keep the previous value of z
-    if sampled_z.sum() == 0:
-        return R2, q, z, sigma2, beta
-    else:
-        z = sampled_z
-    sigma2 = sample_sigma2(X, eps, beta, R2, q, z)
-    beta = sample_beta(X, eps, beta, R2, q, sigma2, z)
+    z = sample_z(X, Y, z, R2, q, T)
+    # # If sampled_z is a vector of zeros, we keep the previous value of z
+    # if sampled_z.sum() == 0:
+    #     return R2, q, z, sigma2, beta
+    # else:
+    #     z = sampled_z
+    sigma2 = sample_sigma2(X, Y, R2, q, z, T)
+    beta = sample_beta(X, Y, R2, q, sigma2, z, k)
     return R2, q, z, sigma2, beta
 
 
