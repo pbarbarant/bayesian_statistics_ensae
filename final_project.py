@@ -69,7 +69,7 @@ def gibbs_sampling(X, y, N_iter):
 
 
 if __name__ == "__main__":
-    N_iter, burn_in = 1100, 100
+    N_iter, burn_in = 11_000, 1000
 
     df, timestamp = preprocess_dataset()
     X = df.iloc[1:, :-1].values
