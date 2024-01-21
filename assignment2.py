@@ -3,9 +3,11 @@ from itertools import product
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 # Use submitit to run jobs on slurm clusters
 import submitit
 from joblib import Parallel, delayed
+
 # Use numba for just-in-time compilation
 from numba import njit
 from scipy import stats
@@ -226,11 +228,6 @@ def one_gibbs_iteration(X, Y, R2, q, z, sigma2, beta, Rs, qs, k, T):
     """Run one iteration of the Gibbs sampler"""
     R2, q = sample_joint_R2_q(Rs, qs, z, beta, sigma2)
     z = sample_z(X, Y, z, R2, q, T)
-    # # If sampled_z is a vector of zeros, we keep the previous value of z
-    # if sampled_z.sum() == 0:
-    #     return R2, q, z, sigma2, beta
-    # else:
-    #     z = sampled_z
     sigma2 = sample_sigma2(X, Y, R2, q, z, T)
     beta = sample_beta(X, Y, R2, q, sigma2, z, k)
     return R2, q, z, sigma2, beta
