@@ -31,6 +31,8 @@ if __name__ == "__main__":
         },
         index=df.columns[:-1],
     )
+    # Calculate R2
+    R2 = lasso.score(X, y)
 
     # Save non-zero coefficients to csv with no index
     df_lasso[df_lasso["Coefficient"] != 0].to_csv(
@@ -41,5 +43,5 @@ if __name__ == "__main__":
         pred=pred,
         ci=ci,
         timestamp=timestamp,
-        title="Rate of Change in Industrial Production Index (INDPRO)\n Actual vs. Predicted Values using Lasso Regression",
+        title=f"Rate of Change in Industrial Production Index (INDPRO)\n Actual vs. Predicted Values using Lasso Regression, R2 = {R2:.4f}",
     )
